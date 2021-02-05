@@ -1,214 +1,208 @@
-use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Duration, Local, Timelike, TimeZone};
 use std::cmp::Ordering;
 use std::fs;
 use std::io;
 
-/// A struct comprising an optional ISO 8601 time format and a single general text field.
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Task {
-    pub string: Option<String>,
+static DATE_FORMAT: &str = "%FT%R";
+
+pub enum Interval {
+    RepDefinite {
+        occurrences: usize,
+        duration: Duration,
+    },
+    RepIndefinite(Duration),
+    Standard(Duration),
+    None,
+}
+
+pub struct Event {
+    start: Option<DateTime<Local>>,
+    interval: Interval,
     pub description: String,
-} // struct Task
+}
 
-impl Task {
-    /*
-    // TODO: this is gonna be real tough. Probably bring in chrono crate.
-    /// Adjusts a repeating interval string so that the end time becomes the new start time.
-    /// Decrements the repetition count if applicable.
-    pub fn advance_repeating(&mut self) {
-        if let None = self.string { return; }
-        if !self.string.unwrap().starts_with('R') { return; }
+impl Event {
+    /// Cycles the start and end times of the interval. Applies only to in/deifnite repeating intervals.
+    pub fn advance(&mut self) {
+        match self.interval {
+            Interval::RepDefinite { occurrences, duration } => {
+                self.start = Some(self.start.unwrap() + duration);
+                self.interval = Interval::RepDefinite {
+                    occurrences: occurrences - 1,
+                    duration,
+                };
+            },
+            Interval::RepIndefinite(duration) => {
+                self.start = Some(self.start.unwrap() + duration);
+            },
+            _ => {},
+        }
+    }
 
-        let start = self.start_time().unwrap();
-        let end = self.end_time().unwrap();
-
-        // get duration between
-        
-        // create next end time
-        //let next = 
-
-        // set new string
-    } // advance_repeating()
-    */
-
-    /// Returns the simple end timestamp of a (repeating) interval, or just the time if the task
-    /// does not involve an interval.
     pub fn end_time(&self) -> Option<String> {
-        if let None = self.string { return None; }
-        let string = self.string.as_ref().unwrap();
-        if !string.contains('/') { return Some(string.clone()); }
-        let s = if string.starts_with('R') {
-            string.split('/').nth(2)
-        } else {
-            string.split('/').nth(1)
-        };
-        // TODO: see start_time() todo.
-        match s {
-            Some(s) => Some(String::from(s)),
-            _ => None,
+        match self.interval {
+            Interval::RepDefinite { duration, .. }
+                | Interval::RepIndefinite(duration)
+                | Interval::Standard(duration)
+            => Some(
+                (self.start.unwrap() + duration).format(DATE_FORMAT).to_string()
+            ),
+            Interval::None => None,
         }
-    } // end_time()
+    }
 
-    /// Returns the simple start timestamp of a (repeating) interval, or just the time if the task
-    /// does not involve an interval.
-    pub fn start_time(&self) -> Option<String> {
-        if let None = self.string { return None; }
-        let string = self.string.as_ref().unwrap();
-        let s = if string.starts_with('R') {
-            string.split('/').nth(1)
-        } else {
-            string.split('/').nth(0)
+    // record syntax: "[iso string]\t[description]"
+    fn from_record(line: &str) -> Result<Self, Error> {
+        let mut event = Event {
+            start: None,
+            interval: Interval::None,
+            description: String::new()
         };
-        // TODO: potential case for better error handling/propagation here.
-        match s {
-            Some(s) => Some(String::from(s)),
-            _ => None,
+        let mut parts = line.split('\t');
+        match parts.next() {
+            Some("") => {}, // leave empty fields as assumed.
+            Some(string) => {
+                let mut tokens = string.split('/');
+                match (tokens.next(), tokens.next(), tokens.next()) {
+                    // repeating interval branch.
+                    (Some(repetition), Some(start), Some(end)) => {
+                        // set start date.
+                        event.start = Some(Local.datetime_from_str(start, DATE_FORMAT)?);
+                        // calculate duration.
+                        let duration = Local.datetime_from_str(end, DATE_FORMAT)? - event.start.unwrap();
+                        // calculate occurrences.
+                        let occurrences: Option<usize> = match repetition.strip_prefix('R') {
+                            Some("") => None, // leave occurrences as None.
+                            Some(string) => {
+                                match string.parse::<usize>() {
+                                    Ok(num) => Some(num),
+                                    Err(_) => return Err(Error::InvalidIso),
+                                }
+                            },
+                            None => None, // leave occurrences as None.
+                        };
+                        if let Some(occurrences) = occurrences {
+                            event.interval = Interval::RepDefinite { occurrences, duration };
+                        } else {
+                            event.interval = Interval::RepIndefinite(duration);
+                        }
+                    },
+                    // non-repeating interval branch.
+                    (Some(start), Some(end), None) => {
+                        event.start = Some(Local.datetime_from_str(start, DATE_FORMAT)?);
+                        event.interval = Interval::Standard(Local.datetime_from_str(end, DATE_FORMAT)? - event.start.unwrap());
+                    },
+                    // non-interval branch.
+                    (Some(start), None, None) => {
+                        event.start = Some(Local.datetime_from_str(start, DATE_FORMAT)?);
+                    },
+                    // untimed branch.
+                    (None, None, None) => {},
+                    _ => return Err(Error::InvalidIso),
+                }
+            },
+            None => return Err(Error::InvalidIso),
         }
-    } // start_time()
-} // impl Task
+        match parts.next() {
+            Some(string) => event.description.push_str(string),
+            None => {}, // leave the empty string that we've already assumed.
+        }
+        Ok(event)
+    }
 
-impl PartialEq for Task {
-    fn eq(&self, other: &Self) -> bool {
-        match (self.start_time(), other.start_time()) {
-            (None, None) => true,
-            (Some(left), Some(right)) => left == right,
+    pub fn interval(&self) -> &Interval { &self.interval }
+
+    pub fn is_repeating(&self) -> bool {
+        match self.interval {
+            Interval::RepDefinite{..} | Interval::RepIndefinite(_) => true,
             _ => false,
         }
     }
-} // Task trait PartialEq
 
-impl Eq for Task {}
+    pub fn is_upcoming(&self) -> bool {
+        match self.start {
+            Some(time) => Local::now() < time,
+            _ => true, // untimed events are always relevant.
+        }
+    }
 
-impl PartialOrd<Self> for Task {
+    pub fn start_time(&self) -> Option<String> {
+        match self.start {
+            Some(datetime) => {
+                let time = datetime.time();
+                if time.hour() == 0 && time.minute() == 0 {
+                    Some(datetime.format("%F").to_string())
+                } else {
+                    Some(datetime.format(DATE_FORMAT).to_string())
+                }
+            },
+            None => None,
+        }
+    }
+}
+
+impl Ord for Event {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.start, other.start) {
+            (Some(self_time), Some(other_time)) => self_time.cmp(&other_time),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
+    }
+}
+
+impl PartialOrd for Event {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
-} // Task trait PartialOrd
+}
 
-impl Ord for Task {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self.start_time(), other.start_time()) {
-            (None, None) => Ordering::Equal,
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (Some(left), Some(right)) => left.cmp(&right),
-        }
+impl PartialEq<Self> for Event {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
     }
-} // Task trait Ord
+}
+
+impl Eq for Event {}
 
 #[derive(Debug)]
 pub enum Error {
+    ChronoParse(chrono::format::ParseError),
+    InvalidIso,
     Io(io::Error),
-    Serde(serde_json::Error),
-} // enum Error
+}
+
+impl From<chrono::format::ParseError> for Error {
+    fn from(error: chrono::format::ParseError) -> Self {
+        Error::ChronoParse(error)
+    }
+}
 
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
         Error::Io(error)
     }
-} // Error trait From<io::Error>
+}
 
-impl From<serde_json::Error> for Error {
-    fn from(error: serde_json::Error) -> Self {
-        Error::Serde(error)
+// TODO: try `?` pattern inside iterator mapping.
+// TODO: print record file line number to stderr upon error (use enumerate()).
+pub fn deserialize(filename: &str) -> Result<Vec<Event>, Error> {
+    let file = fs::read_to_string(filename)?;
+    let mut events: Vec<Event> = Vec::new();
+    for line in file.lines() {
+        events.push(Event::from_record(line)?);
     }
-} // Error trait From<serde_json::Error>
+    Ok(events)
+}
 
-/// Deserializes a vector of tasks from a JSON file.
-pub fn deserialize(filename: &str) -> Result<Vec<Task>, Error> {
-    let tasks: Vec<Task> = serde_json::from_str(&fs::read_to_string(filename)?)?;
-    Ok(tasks)
-} // deserialize()
-
-/// Serializes the given vector of tasks to a JSON file.
-pub fn serialize(filename: &str, tasks: Vec<Task>) -> Result<(), Error> {
-    let file = fs::File::create(filename)?;
-    serde_json::to_writer(file, &tasks)?;
+// TODO: implement
+// TODO: remove underscores from var names.
+pub fn serialize(_filename: &str, _events: Vec<Event>) -> Result<(), Error> {
+    //let file = fs::File::create(filename)?;
     Ok(())
-} // serialize()
+}
 
 #[cfg(test)]
 mod tests {
-    use crate::Task;
-    use std::cmp::Ordering;
-
-    macro_rules! task_a {
-        () => {
-            Task {
-                string: Some(String::from("2021-01-01")),
-                description: String::from("the first task"),
-            }
-        };
-    }
-    macro_rules! task_a_2 {
-        () => {
-            Task {
-                string: Some(String::from("2021-01-01")),
-                description: String::from("the first task's sibling"),
-            }
-        };
-    }
-    macro_rules! task_b {
-        () => {
-            Task {
-                string: Some(String::from("R5/2021-03-03/2021-04-04")),
-                description: String::from("the second task"),
-            }
-        };
-    }
-    macro_rules! task_untimed {
-        () => {
-            Task {
-                string: None,
-                description: String::from("the untimed task"),
-            }
-        };
-    }
-
-    #[test]
-    fn serialize_basic() {
-        let tasks = vec!(task_a!(), task_untimed!());
-        assert_eq!(
-            serde_json::to_string(&tasks).unwrap(),
-            // keep updated to match task_a
-            r#"[{"string":"2021-01-01","description":"the first task"},{"string":null,"description":"the untimed task"}]"#
-        );
-    } // serialize_basic()
-
-    #[test]
-    fn deserialize_basic() {
-        let deser_tasks: Vec<Task> = serde_json::from_str(
-            r#"[{"string":"2021-01-01","description":"the first task"},{"string":null,"description":"the untimed task"}]"#
-        ).unwrap();
-        let tasks = vec!(task_a!(), task_untimed!());
-        assert_eq!(format!("{:?}", tasks), format!("{:?}", deser_tasks));
-    } // deserialize_basic()
-
-    #[test]
-    fn timed_task_ordering() {
-        let (task_a, task_b) = (task_a!(), task_b!());
-
-        // informational
-        assert_eq!(Ordering::Less, "2021-01-01".cmp("2021-01-02"));
-        assert!(task_a < task_b);
-    } // timed_task_ordering()
-
-    #[test]
-    fn timed_task_equality() {
-        let (task_a, task_a_2) = (task_a!(), task_a_2!());
-
-        assert_eq!(task_a, task_a_2);
-    } // timed_task_equality()
-
-    #[test]
-    fn timed_test_inequality() {
-        let (task_a, task_b) = (task_a!(), task_b!());
-
-        assert_ne!(task_a, task_b);
-    }
-
-    #[test]
-    fn timed_untimed_ordering() {
-        assert!(task_a!() < task_untimed!());
-    }
-} // mod test
+}
