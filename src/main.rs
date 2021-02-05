@@ -1,35 +1,32 @@
 use clamendar::{self, Event, Interval};
-use std::io;
+use std::io::{self, BufWriter, Write};
+use std::fs::{self, File};
 use tui::{
-    backend::TermionBackend,
+    backend::CrosstermBackend,
     Terminal
 };
 use termion::raw::IntoRawMode;
 
-const FILEPATH: &str = "/home/ty/clamendar.txt";
+const FILEPATH: &str = "./events.json";
 
 fn main() -> Result<(), clamendar::Error> {
-    let mut events = clamendar::deserialize(FILEPATH)?;
-    events.sort_unstable();
-    print_events(&events);
-    clamendar::serialize(FILEPATH, events)?;
-    Ok(())
+    let mut events = deserialize()?;
+    // TODO: define event handling
+    // TODO: initialize terminal
+    // TODO: define layout
+    // TODO: loop
+    loop {
+        break;
+    }
+
+    serialize(events)
 }
 
-fn print_events(events: &Vec<Event>) {
-    for event in events {
-        match event.interval() {
-            Interval::RepDefinite { occurrences, .. } => {
-                if occurrences > &9 { print!("R0"); } else { print!("R{}", occurrences); }
-            },
-            Interval::RepIndefinite(_) => print!("R "),
-            _ => print!("  "),
-        }
-        print!(" ");
-        match event.start_time() {
-            Some(string) => print!("{}", string),
-            _ => print!("----------"),
-        }
-        print!("\t{}\n", event.description);
-    }
+fn deserialize() -> Result<Vec<Event>, clamendar::Error> {
+    let file = fs::read_to_string(FILENAME)?;
+    serde_json::from_str(&file)
+}
+
+fn serialize(events: Vec<Event>) -> Result<(), clamendar::Error> {
+    fs::write(FILEPATH, &serde_json::to_vec(&events)?)?
 }

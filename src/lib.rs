@@ -1,11 +1,11 @@
 use chrono::{DateTime, Duration, Local, Timelike, TimeZone};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::fs::{self, File};
-use std::io::{self, BufWriter, Write};
+use std::io;
 
-static DATE_FORMAT: &str = "%FT%R";
+const DATE_FORMAT: &str = "%FT%R";
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum Interval {
     RepDefinite {
         occurrences: usize,
@@ -16,7 +16,7 @@ pub enum Interval {
     None,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Event {
     start: Option<DateTime<Local>>,
     interval: Interval,
@@ -216,26 +216,4 @@ impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
         Error::Io(error)
     }
-}
-
-// TODO: maybe print record file line number to stderr upon error (use enumerate()).
-pub fn deserialize(filename: &str) -> Result<Vec<Event>, Error> {
-    let file = fs::read_to_string(filename)?;
-    let mut events: Vec<Event> = Vec::new();
-    for line in file.lines() {
-        events.push(Event::from_record(line)?);
-    }
-    Ok(events)
-}
-
-pub fn serialize(filename: &str, events: Vec<Event>) -> Result<(), Error> {
-    let mut file = BufWriter::new(File::create(filename)?);
-    for event in events {
-        file.write(&format!("{}\t{}\n", event.iso_string(), event.description).as_bytes())?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
 }
