@@ -1,10 +1,11 @@
 use chrono::{DateTime, Duration, Local, Timelike, TimeZone};
 use std::cmp::Ordering;
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, BufWriter, Write};
 
 static DATE_FORMAT: &str = "%FT%R";
 
+#[derive(Debug)]
 pub enum Interval {
     RepDefinite {
         occurrences: usize,
@@ -15,6 +16,7 @@ pub enum Interval {
     None,
 }
 
+#[derive(Debug)]
 pub struct Event {
     start: Option<DateTime<Local>>,
     interval: Interval,
@@ -139,6 +141,37 @@ impl Event {
             None => None,
         }
     }
+
+    pub fn iso_string(&self) -> String {
+        match (self.start, &self.interval) {
+            (Some(datetime), Interval::RepDefinite { occurrences, duration }) => {
+                format!(
+                    "R{}/{}/{}",
+                    occurrences,
+                    datetime.format(DATE_FORMAT).to_string(),
+                    (datetime + *duration).format(DATE_FORMAT).to_string()
+                )
+            },
+            (Some(datetime), Interval::RepIndefinite(duration)) => {
+                format!(
+                    "R/{}/{}",
+                    datetime.format(DATE_FORMAT).to_string(),
+                    (datetime + *duration).format(DATE_FORMAT).to_string()
+                )
+            },
+            (Some(datetime), Interval::Standard(duration)) => {
+                format!(
+                    "{}/{}",
+                    datetime.format(DATE_FORMAT).to_string(),
+                    (datetime + *duration).format(DATE_FORMAT).to_string()
+                )
+            },
+            (Some(datetime), Interval::None) => {
+                datetime.format(DATE_FORMAT).to_string()
+            },
+            (None, _) => String::new(),
+        }
+    }
 }
 
 impl Ord for Event {
@@ -185,8 +218,7 @@ impl From<io::Error> for Error {
     }
 }
 
-// TODO: try `?` pattern inside iterator mapping.
-// TODO: print record file line number to stderr upon error (use enumerate()).
+// TODO: maybe print record file line number to stderr upon error (use enumerate()).
 pub fn deserialize(filename: &str) -> Result<Vec<Event>, Error> {
     let file = fs::read_to_string(filename)?;
     let mut events: Vec<Event> = Vec::new();
@@ -196,10 +228,11 @@ pub fn deserialize(filename: &str) -> Result<Vec<Event>, Error> {
     Ok(events)
 }
 
-// TODO: implement
-// TODO: remove underscores from var names.
-pub fn serialize(_filename: &str, _events: Vec<Event>) -> Result<(), Error> {
-    //let file = fs::File::create(filename)?;
+pub fn serialize(filename: &str, events: Vec<Event>) -> Result<(), Error> {
+    let mut file = BufWriter::new(File::create(filename)?);
+    for event in events {
+        file.write(&format!("{}\t{}\n", event.iso_string(), event.description).as_bytes())?;
+    }
     Ok(())
 }
 

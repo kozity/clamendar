@@ -1,8 +1,12 @@
-//use std::io;
-//use std::process;
 use clamendar::{self, Event, Interval};
+use std::io;
+use tui::{
+    backend::TermionBackend,
+    Terminal
+};
+use termion::raw::IntoRawMode;
 
-static FILEPATH: &'static str = "/home/ty/clamendar.txt";
+const FILEPATH: &str = "/home/ty/clamendar.txt";
 
 fn main() -> Result<(), clamendar::Error> {
     let mut events = clamendar::deserialize(FILEPATH)?;
