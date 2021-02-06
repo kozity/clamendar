@@ -20,6 +20,7 @@ use tui::{
 const FILEPATH: &str = "./events.json";
 
 enum Focus {
+    InputAdd,
     Intervals,
     Timed,
     Untimed,
@@ -27,10 +28,90 @@ enum Focus {
 }
 
 struct State {
+    buffer: String,
     focus: Focus,
-    intervals: TableState,
-    timed: TableState,
-    untimed: ListState,
+    intervals: Vec<Event>,
+    intervals_offset: usize,
+    intervals_state: TableState,
+    timed: Vec<Event>,
+    timed_offset: usize,
+    timed_state: TableState,
+    untimed: Vec<Event>,
+    untimed_offset: usize,
+    untimed_state: ListState,
+}
+
+impl State {
+    fn focus(&mut self, target: Focus) {
+        match self.focus {
+            Focus::Intervals => self.intervals_state.select(None),
+            Focus::Timed => self.timed_state.select(None),
+            Focus::Untimed => self.untimed_state.select(None),
+            _ => {},
+        }
+        match target {
+            Focus::Intervals =>
+                if !self.intervals.is_empty() { self.intervals_state.select(Some(self.intervals_offset)) },
+            Focus::Timed =>
+                if !self.timed.is_empty() { self.timed_state.select(Some(self.timed_offset)) },
+            Focus::Untimed =>
+                if !self.untimed.is_empty() { self.untimed_state.select(Some(self.untimed_offset)) },
+            _ => {},
+        }
+        self.focus = target;
+    }
+
+    fn scroll_down(&mut self) {
+        match s.focus {
+            Focus::Intervals => match s.intervals_state.selected() {
+                Some(selected) if selected < $v.len() - 1 => {
+                    s.intervals_offset = selected + 1;
+                    s.intervals_state.select(Some(s.intervals_offset));
+                },
+                _ => {},
+            },
+            Focus::Timed => match s.timed_state.selected() {
+                Some(selected) if selected < $v.len() - 1 => {
+                    s.timed_offset = selected + 1;
+                    s.timed_state.select(Some(s.timed_offset));
+                },
+                _ => {},
+            },
+            Focus::Untimed => match s.untimed_state.selected() {
+                Some(selected) if selected < $v.len() - 1 => {
+                    s.untimed_offset = selected + 1;
+                    s.untimed_state.select(Some(s.untimed_offset));
+                },
+                _ => {},
+            },
+        }
+    }
+
+    fn scroll_up(&mut self)
+        match s.focus {
+            Focus::Intervals => match s.intervals_state.selected() {
+                Some(selected) if selected > 0 => {
+                    s.intervals_offset = selected - 1;
+                    s.intervals_state.select(Some(s.intervals_offset));
+                },
+                _ => {},
+            },
+            Focus::Timed => match s.timed_state.selected() {
+                Some(selected) if selected > 0 => {
+                    s.timed_offset = selected - 1;
+                    s.timed_state.select(Some(s.timed_offset));
+                },
+                _ => {},
+            },
+            Focus::Untimed => match s.untimed_state.selected() {
+                Some(selected) if selected > 0 => {
+                    s.untimed_offset = selected - 1;
+                    s.untimed_state.select(Some(s.untimed_offset));
+                },
+                _ => {},
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -59,34 +140,28 @@ impl From<serde_json::Error> for Error {
 }
 
 fn main() -> Result<(), Error> {
-    let mut events_intervals: Vec<Event> = Vec::new();
-    let mut events_timed: Vec<Event> = Vec::new();
-    let mut events_untimed: Vec<Event> = Vec::new();
+    let mut s = State {
+        buffer: String::new(),
+        focus: Focus::None,
+        intervals: Vec::new(),
+        intervals_offset: 0,
+        intervals_state: TableState::default(),
+        timed: Vec::new(),
+        timed_offset: 0,
+        timed_state: TableState::default(),
+        untimed: Vec::new(),
+        untimed_offset: 0,
+        untimed_state: ListState::default(),
+    };
     for event in deserialize()? {
         match (&event.start, &event.interval) {
-            (Some(_), Interval::None) => events_timed.push(event),
-            (Some(_), _) => events_intervals.push(event),
-            (None, _) => events_untimed.push(event),
+            (Some(_), Interval::None) => s.timed.push(event),
+            (Some(_), _) => s.intervals.push(event),
+            (None, _) => s.untimed.push(event),
         }
     }
-    events_timed.sort_unstable();
-    events_intervals.sort_unstable();
-
-    let mut state = State {
-        focus: Focus::None,
-        intervals: TableState::default(),
-        timed: TableState::default(),
-        untimed: ListState::default(),
-    };
-    if !events_intervals.is_empty() {
-        state.intervals.select(Some(0));
-    }
-    if !events_timed.is_empty() {
-        state.timed.select(Some(0));
-    }
-    if !events_untimed.is_empty() {
-        state.untimed.select(Some(0));
-    }
+    s.intervals.sort_unstable();
+    s.timed.sort_unstable();
 
     terminal::enable_raw_mode()?;
     let mut terminal = Terminal::new(
@@ -104,7 +179,8 @@ fn main() -> Result<(), Error> {
                 .constraints(
                     [
                         Constraint::Percentage(30),
-                        Constraint::Percentage(70),
+                        Constraint::Min(0),
+                        Constraint::Length(0),
                     ]
                     .as_ref()
                 )
@@ -120,8 +196,8 @@ fn main() -> Result<(), Error> {
                 .split(chunks[1]);
 
             // Lay out intervals in the top block.
-            let mut table_intervals = Table::new(
-                events_intervals
+            let table_intervals = Table::new(
+                s.intervals
                     .iter()
                     .map(|event| {
                         Row::new(vec![
@@ -141,11 +217,15 @@ fn main() -> Result<(), Error> {
             .widths(&[
                 Constraint::Percentage(20),
                 Constraint::Percentage(80),
-            ]);
+            ])
+            .highlight_style(Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::LightBlue)
+            );
 
             // Lay out timed events in the bottom left block.
-            let mut table_timed = Table::new(
-                events_timed
+            let table_timed = Table::new(
+                s.timed
                     .iter()
                     .map(|event| {
                         Row::new(vec![
@@ -165,10 +245,14 @@ fn main() -> Result<(), Error> {
             .widths(&[
                 Constraint::Percentage(20),
                 Constraint::Percentage(80),
-            ]);
+            ])
+            .highlight_style(Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::LightBlue)
+            );
             
             // Lay out untimed events in the bottom right block.
-            let mut list_untimed = List::new(events_untimed
+            let list_untimed = List::new(s.untimed
                 .iter()
                 .map(|event| ListItem::new(event.description.clone()))
                 .collect::<Vec<ListItem>>()
@@ -176,95 +260,72 @@ fn main() -> Result<(), Error> {
             .block(Block::default()
                 .borders(Borders::ALL)
                 .title("Untimed")
+            )
+            .highlight_style(Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::LightBlue)
             );
-
-            match state.focus {
-                Focus::Intervals => {
-                    table_intervals = table_intervals
-                        .highlight_style(Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(Color::LightBlue)
-                    );
-                },
-                Focus::Timed => {
-                    table_timed = table_timed
-                        .highlight_style(Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(Color::LightBlue)
-                    );
-                },
-                Focus::Untimed => {
-                    list_untimed = list_untimed
-                        .highlight_style(Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(Color::LightBlue)
-                    );
-                },
-                Focus::None => {},
-            }
 
             term.render_stateful_widget(table_intervals, chunks[0], &mut state.intervals);
             term.render_stateful_widget(table_timed, chunks_bottom[0], &mut state.timed);
             term.render_stateful_widget(list_untimed, chunks_bottom[1], &mut state.untimed);
         })?;
 
-        // TODO: handle event
-        match event::read()? {
-            event::Event::Key(keycode) => match keycode.code {
-                KeyCode::Char('g') => state.focus = Focus::Intervals,
-                KeyCode::Char('h') => state.focus = Focus::Timed,
-                KeyCode::Char('j') => {
-                    match state.focus {
-                        Focus::Intervals => {
-                            match state.intervals.selected() {
-                                Some(selected) if selected < events_intervals.len() - 1 => state.intervals.select(Some(selected + 1)),
-                                _ => {},
-                            }
-                        },
-                        Focus::Timed => {
-                            match state.timed.selected() {
-                                Some(selected) if selected < events_timed.len() - 1 => state.timed.select(Some(selected + 1)),
-                                _ => {},
-                            }
-                        },
-                        Focus::Untimed => {
-                            match state.untimed.selected() {
-                                Some(selected) if selected < events_untimed.len() - 1 => state.untimed.select(Some(selected + 1)),
-                                _ => {},
-                            }
-                        },
-                        Focus::None => {},
-                    }
+        match state.focus {
+            Focus::InputAdd => match event::read()? {
+                event::Event::Key(keycode) => match keycode.code {
+                    KeyCode::Esc => state.focus(Focus::None),
+                    _ => {},
                 },
-                KeyCode::Char('k') => {
-                    match state.focus {
-                        Focus::Intervals => {
-                            match state.intervals.selected() {
-                                Some(selected) if selected > 0 => state.intervals.select(Some(selected - 1)),
-                                _ => {},
-                            }
-                        },
-                        Focus::Timed => {
-                            match state.timed.selected() {
-                                Some(selected) if selected > 0 => state.timed.select(Some(selected - 1)),
-                                _ => {},
-                            }
-                        },
-                        Focus::Untimed => {
-                            match state.untimed.selected() {
-                                Some(selected) if selected > 0 => state.untimed.select(Some(selected - 1)),
-                                _ => {},
-                            }
-                        },
-                        Focus::None => {},
-                    }
-                },
-                KeyCode::Char('l') => state.focus = Focus::Untimed,
-                KeyCode::Char('q') => break,
-                KeyCode::Esc => state.focus = Focus::None,
                 _ => {},
             },
-            _ => {},
+            Focus::Intervals => match event::read()? {
+                event::Event::Key(keycode) => match keycode.code {
+                    KeyCode::Char('h') => state.focus(Focus::Timed),
+                    KeyCode::Char('i') => state.focus(Focus::InputAdd),
+                    KeyCode::Char('j') => s.scroll_down(),
+                    KeyCode::Char('k') => s.scroll_up(),
+                    KeyCode::Char('l') => state.focus(Focus::Untimed),
+                    KeyCode::Char('q') => break,
+                    KeyCode::Esc => state.focus(Focus::None),
+                    _ => {},
+                },
+                _ => {},
+            },
+            Focus::Timed => match event::read()? {
+                event::Event::Key(keycode) => match keycode.code {
+                    KeyCode::Char('i') => state.focus(Focus::InputAdd),
+                    KeyCode::Char('j') => s.scroll_down(),
+                    KeyCode::Char('k') => s.scroll_up(),
+                    KeyCode::Char('l') => state.focus(Focus::Untimed),
+                    KeyCode::Char('q') => break,
+                    KeyCode::Esc => state.focus(Focus::None),
+                    _ => {},
+                },
+                _ => {},
+            },
+            Focus::Untimed => match event::read()? {
+                event::Event::Key(keycode) => match keycode.code {
+                    KeyCode::Char('h') => state.focus(Focus::Timed),
+                    KeyCode::Char('i') => state.focus(Focus::InputAdd),
+                    KeyCode::Char('j') => s.scroll_down(),
+                    KeyCode::Char('k') => s.scroll_up(),
+                    KeyCode::Char('q') => break,
+                    KeyCode::Esc => state.focus(Focus::None),
+                    _ => {},
+                },
+                _ => {},
+            },
+            Focus::None => match event::read()? {
+                event::Event::Key(keycode) => match keycode.code {
+                    KeyCode::Char('g') => state.focus(Focus::Intervals),
+                    KeyCode::Char('h') => state.focus(Focus::Timed),
+                    KeyCode::Char('i') => state.focus(Focus::InputAdd),
+                    KeyCode::Char('l') => state.focus(Focus::Untimed),
+                    _ => {},
+                },
+                _ => {},
+            },
         }
     }
 
