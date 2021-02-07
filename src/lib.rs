@@ -1,8 +1,6 @@
-use chrono::{DateTime, Local, Timelike};
+use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-
-const DATE_FORMAT: &str = "%FT%R";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Interval {
@@ -43,34 +41,10 @@ impl Event {
         }
     }
 
-    pub fn end_time(&self) -> Option<String> {
-        match self.interval {
-            Interval::RepDefinite { end, .. }
-                | Interval::RepIndefinite(end)
-                | Interval::Standard(end)
-            => Some(end.format(DATE_FORMAT).to_string()),
-            Interval::None => None,
-        }
-    }
-
     pub fn is_upcoming(&self) -> bool {
         match self.start {
             Some(time) => Local::now() < time,
             _ => true, // untimed events are always relevant.
-        }
-    }
-
-    pub fn start_time(&self) -> Option<String> {
-        match self.start {
-            Some(datetime) => {
-                let time = datetime.time();
-                if time.hour() == 0 && time.minute() == 0 {
-                    Some(datetime.format("%F").to_string())
-                } else {
-                    Some(datetime.format(DATE_FORMAT).to_string())
-                }
-            },
-            None => None,
         }
     }
 }

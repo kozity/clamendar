@@ -1,6 +1,3 @@
-// TODO: replace start_time()'s with functionality native to main.rs
-// TODO: add ability to delete events
-
 use chrono::{DateTime, Local, LocalResult, Timelike, TimeZone};
 use clamendar::{self, Event, Interval};
 use crossterm::{
@@ -113,6 +110,27 @@ impl State {
         Ok(())
     }
 
+    fn delete_selected(&mut self) {
+        match self.last_error {
+            Some(Error::DeletionWarning) => {
+                match self.focus {
+                    Focus::Intervals => { self.intervals.remove(self.intervals_state.selected().unwrap()); },
+                    Focus::Timed => { self.timed.remove(self.timed_state.selected().unwrap()); },
+                    Focus::Untimed => { self.untimed.remove(self.untimed_state.selected().unwrap()); },
+                    _ => {}, // deletion can't happen anywhere else.
+                }
+                self.last_error = None;
+            },
+            _ => match self.focus {
+                Focus::Intervals
+                    | Focus::Timed
+                    | Focus::Untimed
+                => self.last_error = Some(Error::DeletionWarning),
+                _ => {},
+            },
+        }
+    }
+
     fn focus(&mut self, target: Focus) -> Result<(), Error> {
         match self.focus {
             Focus::Intervals => self.intervals_state.select(None),
@@ -196,6 +214,7 @@ impl State {
 #[derive(Debug)]
 enum Error {
     Crossterm(crossterm::ErrorKind),
+    DeletionWarning,
     InvalidIso,
     InvalidRecord,
     InvalidTime,
@@ -354,6 +373,7 @@ fn main() -> Result<(), Error> {
             let text = match s.focus {
                 Focus::InputAdd => Paragraph::new(format!("{}{}", ADD_PROMPT, s.buffer.replace('\t', " "))),
                 _ => match s.last_error {
+                    Some(Error::DeletionWarning) => Paragraph::new("Warning: press 'd' again to delete (irreversible)."),
                     Some(Error::InvalidIso) => Paragraph::new("Error: the string was not properly formatted."),
                     Some(Error::InvalidRecord) => Paragraph::new("Error: input: \"[iso string]\\t[description]\""),
                     Some(Error::InvalidTime) => Paragraph::new("Error: the time entered was invalid or not specific enough."),
@@ -402,6 +422,7 @@ fn main() -> Result<(), Error> {
             },
             Focus::Intervals => match event::read()? {
                 event::Event::Key(keycode) => match keycode.code {
+                    KeyCode::Char('d') => s.delete_selected(),
                     KeyCode::Char('h') => s.focus(Focus::Timed)?,
                     KeyCode::Char('i') => {
                         s.focus(Focus::InputAdd)?;
@@ -412,13 +433,17 @@ fn main() -> Result<(), Error> {
                     KeyCode::Char('k') => s.scroll_up(),
                     KeyCode::Char('l') => s.focus(Focus::Untimed)?,
                     KeyCode::Char('q') => break,
-                    KeyCode::Esc => s.focus(Focus::None)?,
+                    KeyCode::Esc => match s.last_error {
+                        Some(Error::DeletionWarning) => s.last_error = None,
+                        _ => s.focus(Focus::None)?,
+                    },
                     _ => {},
                 },
                 _ => {},
             },
             Focus::Timed => match event::read()? {
                 event::Event::Key(keycode) => match keycode.code {
+                    KeyCode::Char('d') => s.delete_selected(),
                     KeyCode::Char('g') => s.focus(Focus::Intervals)?,
                     KeyCode::Char('i') => {
                         s.focus(Focus::InputAdd)?;
@@ -428,13 +453,17 @@ fn main() -> Result<(), Error> {
                     KeyCode::Char('k') => s.scroll_up(),
                     KeyCode::Char('l') => s.focus(Focus::Untimed)?,
                     KeyCode::Char('q') => break,
-                    KeyCode::Esc => s.focus(Focus::None)?,
+                    KeyCode::Esc => match s.last_error {
+                        Some(Error::DeletionWarning) => s.last_error = None,
+                        _ => s.focus(Focus::None)?,
+                    },
                     _ => {},
                 },
                 _ => {},
             },
             Focus::Untimed => match event::read()? {
                 event::Event::Key(keycode) => match keycode.code {
+                    KeyCode::Char('d') => s.delete_selected(),
                     KeyCode::Char('g') => s.focus(Focus::Intervals)?,
                     KeyCode::Char('h') => s.focus(Focus::Timed)?,
                     KeyCode::Char('i') => {
@@ -444,7 +473,10 @@ fn main() -> Result<(), Error> {
                     KeyCode::Char('j') => s.scroll_down(),
                     KeyCode::Char('k') => s.scroll_up(),
                     KeyCode::Char('q') => break,
-                    KeyCode::Esc => s.focus(Focus::None)?,
+                    KeyCode::Esc => match s.last_error {
+                        Some(Error::DeletionWarning) => s.last_error = None,
+                        _ => s.focus(Focus::None)?,
+                    },
                     _ => {},
                 },
                 _ => {},
