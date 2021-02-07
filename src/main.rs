@@ -16,7 +16,8 @@ use tui::{
 
 const ADD_PROMPT: &str = "Add: >";
 const ADD_PROMPT_LEN: u16 = 6;
-const FILEPATH: &str = "./events.json";
+const FILEPATH_BACKUP: &str = "/home/ty/code/clamendar/events.json.bak";
+const FILEPATH: &str = "/home/ty/code/clamendar/events.json";
 const YMD: &str = "%F";
 const YMDHM: &str = "%FT%R";
 
@@ -265,6 +266,8 @@ fn main() -> Result<(), Error> {
     }
     s.intervals.sort_unstable();
     s.timed.sort_unstable();
+
+    if !FILEPATH_BACKUP.is_empty() { fs::copy(FILEPATH, FILEPATH_BACKUP)?; }
 
     let mut terminal = Terminal::new(
         CrosstermBackend::new(
