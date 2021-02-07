@@ -18,8 +18,8 @@ const ADD_PROMPT: &str = "Add: >";
 const ADD_PROMPT_LEN: u16 = 6;
 const FILEPATH_BACKUP: &str = "/home/ty/code/clamendar/events.json.bak";
 const FILEPATH: &str = "/home/ty/code/clamendar/events.json";
-const YMD: &str = "%F";
-const YMDHM: &str = "%FT%R";
+const YMD: &str = "%m-%d";
+const YMDHM: &str = "%m-%dT%R";
 
 enum Focus {
     InputAdd,
@@ -96,13 +96,11 @@ impl State {
         if event.start == None && event.description == "" { return Err(Error::NoInfo); }
         match (event.start, &event.interval) {
             (None, _) => self.untimed.push(event),
-            (Some(_), Interval::RepDefinite { .. })
-            | (Some(_), Interval::RepIndefinite(_))
-            | (Some(_), Interval::Standard(_)) => {
+            (Some(_), Interval::Standard(_)) => {
                 self.intervals.push(event);
                 self.intervals.sort_unstable();
             },
-            (Some(_), Interval::None) => {
+            (Some(_), _) => {
                 self.timed.push(event);
                 self.timed.sort_unstable();
             },
@@ -259,7 +257,10 @@ fn main() -> Result<(), Error> {
     };
     for event in deserialize()? {
         match (&event.start, &event.interval) {
-            (Some(_), Interval::None) => s.timed.push(event),
+            (Some(_), Interval::None)
+                | (Some(_), Interval::RepDefinite { .. })
+                | (Some(_), Interval::RepIndefinite(_))
+            => s.timed.push(event),
             (Some(_), _) => s.intervals.push(event),
             (None, _) => s.untimed.push(event),
         }
@@ -284,7 +285,7 @@ fn main() -> Result<(), Error> {
                 .direction(Direction::Vertical)
                 .constraints(
                     [
-                        Constraint::Length(10),
+                        Constraint::Length(6),
                         Constraint::Min(0),
                         Constraint::Length(3),
                     ]
@@ -503,6 +504,7 @@ fn main() -> Result<(), Error> {
     }
 
     terminal::disable_raw_mode()?;
+    terminal.clear()?;
     serialize(s.take_all())
 }
 
