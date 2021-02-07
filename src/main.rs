@@ -1,5 +1,3 @@
-// TODO: add in-place editing functionality
-
 mod config;
 mod error;
 mod state;
@@ -29,24 +27,11 @@ use tui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     Terminal,
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table},
 };
 
 fn main() -> Result<(), Error> {
-    let mut s = State {
-        buffer: String::new(),
-        focus: Focus::None,
-        intervals: Vec::new(),
-        intervals_offset: 0,
-        intervals_state: TableState::default(),
-        last_error: None,
-        timed: Vec::new(),
-        timed_offset: 0,
-        timed_state: TableState::default(),
-        untimed: Vec::new(),
-        untimed_offset: 0,
-        untimed_state: ListState::default(),
-    };
+    let mut s = State::default();
     for event in deserialize()? {
         match (&event.start, &event.interval) {
             (Some(_), Interval::None)
@@ -59,6 +44,7 @@ fn main() -> Result<(), Error> {
     }
     s.intervals.sort_unstable();
     s.timed.sort_unstable();
+    s.untimed.sort_unstable();
 
     if !FILEPATH_BACKUP.is_empty() { fs::copy(FILEPATH, FILEPATH_BACKUP)?; }
 
@@ -174,6 +160,7 @@ fn main() -> Result<(), Error> {
                     Some(Error::InvalidRecord) => Paragraph::new("Error: input: \"[iso string]\\t[description]\""),
                     Some(Error::InvalidTime) => Paragraph::new("Error: the time entered was invalid or not specific enough."),
                     Some(Error::NoInfo) => Paragraph::new("The event contained no information, so was not added."),
+                    Some(Error::YankWarning) => Paragraph::new("Warning: press 'y' again to yank selected event into buffer."),
                     _ => Paragraph::new(""),
                 },
             }.block(Block::default().borders(Borders::ALL));
@@ -186,18 +173,28 @@ fn main() -> Result<(), Error> {
 
         match s.focus {
             Focus::InputAdd => {
-                let len: u16 = if s.buffer.len() > u16::MAX.into() {
+                let len: u16 = if s.cursor_offset > u16::MAX.into() {
                     u16::MAX
                 } else {
-                    s.buffer.len() as u16
+                    s.cursor_offset as u16
                 };
                 terminal.set_cursor(ADD_PROMPT_LEN + len + 1, terminal.size()?.height - 2)?;
                 terminal.show_cursor()?;
 
                 match event::read()? {
                     event::Event::Key(keycode) => match keycode.code {
-                        KeyCode::Backspace => { s.buffer.pop(); },
-                        KeyCode::Char(c) => s.buffer.push(c),
+                        KeyCode::Backspace => if s.cursor_offset > 0 {
+                            s.cursor_offset -= 1;
+                            s.buffer.remove(s.cursor_offset);
+                        },
+                        KeyCode::Char(c) => {
+                            s.buffer.insert(s.cursor_offset, c);
+                            s.cursor_offset += 1;
+                        },
+                        KeyCode::Delete => if s.cursor_offset < s.buffer.len() {
+                            s.buffer.remove(s.cursor_offset);
+                        },
+                        KeyCode::Down => s.cursor_end(),
                         KeyCode::Enter => {
                             match s.add_event_from_buffer() {
                                 err @ Err(Error::InvalidIso)
@@ -207,10 +204,16 @@ fn main() -> Result<(), Error> {
                                     => s.last_error = Some(err.unwrap_err()),
                                 _ => s.last_error = None,
                             }
-                            s.focus(Focus::None)?;
+                            s.focus(Focus::None);
                         },
-                        KeyCode::Esc => s.focus(Focus::None)?,
-                        KeyCode::Tab => s.buffer.push('\t'),
+                        KeyCode::Esc => s.focus(Focus::None),
+                        KeyCode::Left => s.cursor_left(),
+                        KeyCode::Right => s.cursor_right(),
+                        KeyCode::Tab => {
+                            s.buffer.insert(s.cursor_offset, '\t');
+                            s.cursor_offset += 1;
+                        },
+                        KeyCode::Up => s.cursor_beginning(),
                         _ => {},
                     },
                     _ => {},
@@ -219,19 +222,20 @@ fn main() -> Result<(), Error> {
             Focus::Intervals => match event::read()? {
                 event::Event::Key(keycode) => match keycode.code {
                     KeyCode::Char('d') => s.delete_selected(),
-                    KeyCode::Char('h') => s.focus(Focus::Timed)?,
+                    KeyCode::Char('h') => s.focus(Focus::Timed),
                     KeyCode::Char('i') => {
-                        s.focus(Focus::InputAdd)?;
+                        s.focus(Focus::InputAdd);
                         terminal.show_cursor()?;
                         terminal.set_cursor(ADD_PROMPT_LEN, 0)?;
                     },
                     KeyCode::Char('j') => s.scroll_down(),
                     KeyCode::Char('k') => s.scroll_up(),
-                    KeyCode::Char('l') => s.focus(Focus::Untimed)?,
+                    KeyCode::Char('l') => s.focus(Focus::Untimed),
                     KeyCode::Char('q') => break,
+                    KeyCode::Char('y') => s.yank_selected(),
                     KeyCode::Esc => match s.last_error {
                         Some(Error::DeletionWarning) => s.last_error = None,
-                        _ => s.focus(Focus::None)?,
+                        _ => s.focus(Focus::None),
                     },
                     _ => {},
                 },
@@ -240,18 +244,19 @@ fn main() -> Result<(), Error> {
             Focus::Timed => match event::read()? {
                 event::Event::Key(keycode) => match keycode.code {
                     KeyCode::Char('d') => s.delete_selected(),
-                    KeyCode::Char('g') => s.focus(Focus::Intervals)?,
+                    KeyCode::Char('g') => s.focus(Focus::Intervals),
                     KeyCode::Char('i') => {
-                        s.focus(Focus::InputAdd)?;
+                        s.focus(Focus::InputAdd);
                         terminal.set_cursor(ADD_PROMPT_LEN, 0)?;
                     },
                     KeyCode::Char('j') => s.scroll_down(),
                     KeyCode::Char('k') => s.scroll_up(),
-                    KeyCode::Char('l') => s.focus(Focus::Untimed)?,
+                    KeyCode::Char('l') => s.focus(Focus::Untimed),
                     KeyCode::Char('q') => break,
+                    KeyCode::Char('y') => s.yank_selected(),
                     KeyCode::Esc => match s.last_error {
                         Some(Error::DeletionWarning) => s.last_error = None,
-                        _ => s.focus(Focus::None)?,
+                        _ => s.focus(Focus::None),
                     },
                     _ => {},
                 },
@@ -260,18 +265,19 @@ fn main() -> Result<(), Error> {
             Focus::Untimed => match event::read()? {
                 event::Event::Key(keycode) => match keycode.code {
                     KeyCode::Char('d') => s.delete_selected(),
-                    KeyCode::Char('g') => s.focus(Focus::Intervals)?,
-                    KeyCode::Char('h') => s.focus(Focus::Timed)?,
+                    KeyCode::Char('g') => s.focus(Focus::Intervals),
+                    KeyCode::Char('h') => s.focus(Focus::Timed),
                     KeyCode::Char('i') => {
-                        s.focus(Focus::InputAdd)?;
+                        s.focus(Focus::InputAdd);
                         terminal.set_cursor(ADD_PROMPT_LEN, 0)?;
                     },
                     KeyCode::Char('j') => s.scroll_down(),
                     KeyCode::Char('k') => s.scroll_up(),
                     KeyCode::Char('q') => break,
+                    KeyCode::Char('y') => s.yank_selected(),
                     KeyCode::Esc => match s.last_error {
                         Some(Error::DeletionWarning) => s.last_error = None,
-                        _ => s.focus(Focus::None)?,
+                        _ => s.focus(Focus::None),
                     },
                     _ => {},
                 },
@@ -279,13 +285,13 @@ fn main() -> Result<(), Error> {
             },
             Focus::None => match event::read()? {
                 event::Event::Key(keycode) => match keycode.code {
-                    KeyCode::Char('g') => s.focus(Focus::Intervals)?,
-                    KeyCode::Char('h') => s.focus(Focus::Timed)?,
+                    KeyCode::Char('g') => s.focus(Focus::Intervals),
+                    KeyCode::Char('h') => s.focus(Focus::Timed),
                     KeyCode::Char('i') => {
-                        s.focus(Focus::InputAdd)?;
+                        s.focus(Focus::InputAdd);
                         terminal.set_cursor(ADD_PROMPT_LEN, 0)?;
                     },
-                    KeyCode::Char('l') => s.focus(Focus::Untimed)?,
+                    KeyCode::Char('l') => s.focus(Focus::Untimed),
                     KeyCode::Char('q') => break,
                     KeyCode::Esc => s.last_error = None,
                     _ => {},
@@ -350,6 +356,40 @@ fn datetime_from_iso(string: &str) -> Result<DateTime<Local>, Error> {
     match datetime {
         Some(d) => Ok(d),
         None => Err(Error::InvalidTime),
+    }
+}
+
+fn event_to_record(event: Event) -> String {
+    const ISO_FULL: &str = "%FT%T";
+    match (event.start, event.interval) {
+        (None, _) => format!(
+            "\t{}",
+            event.description
+        ),
+        (_, Interval::RepDefinite { occurrences, end }) => format!(
+            "R{}/{}/{}\t{}",
+            occurrences,
+            event.start.unwrap().format(ISO_FULL),
+            end.format(ISO_FULL),
+            event.description
+        ),
+        (_, Interval::RepIndefinite(end)) => format!(
+            "R/{}/{}\t{}",
+            event.start.unwrap().format(ISO_FULL),
+            end.format(ISO_FULL),
+            event.description
+        ),
+        (_, Interval::Standard(end)) => format!(
+            "{}/{}\t{}",
+            event.start.unwrap().format(ISO_FULL),
+            end.format(ISO_FULL),
+            event.description
+        ),
+        (_, Interval::None) => format!(
+            "{}\t{}",
+            event.start.unwrap().format(ISO_FULL),
+            event.description
+        ),
     }
 }
 

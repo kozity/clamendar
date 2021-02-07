@@ -1,9 +1,11 @@
 use crate::{
     datetime_from_iso,
     error::Error,
+    event_to_record,
     Event,
     Interval,
 };
+use std::default::Default;
 use tui::widgets::{ ListState, TableState };
 
 pub enum Focus {
@@ -16,6 +18,7 @@ pub enum Focus {
 
 pub struct State {
     pub buffer: String,
+    pub cursor_offset: usize,
     pub focus: Focus,
     pub intervals: Vec<Event>,
     pub intervals_offset: usize,
@@ -80,7 +83,10 @@ impl State {
         }
         if event.start == None && event.description == "" { return Err(Error::NoInfo); }
         match (event.start, &event.interval) {
-            (None, _) => self.untimed.push(event),
+            (None, _) => {
+                self.untimed.push(event);
+                self.untimed.sort_unstable();
+            },
             (Some(_), Interval::Standard(_)) => {
                 self.intervals.push(event);
                 self.intervals.sort_unstable();
@@ -92,6 +98,18 @@ impl State {
         }
         self.buffer.clear();
         Ok(())
+    }
+
+    pub fn cursor_beginning(&mut self) { self.cursor_offset = 0; }
+
+    pub fn cursor_end(&mut self) { self.cursor_offset = self.buffer.len(); }
+
+    pub fn cursor_left(&mut self) { self.cursor_offset = self.cursor_offset.saturating_sub(1); }
+
+    pub fn cursor_right(&mut self) {
+        if self.cursor_offset < self.buffer.len() {
+            self.cursor_offset += 1;
+        }
     }
 
     pub fn delete_selected(&mut self) {
@@ -115,7 +133,7 @@ impl State {
         }
     }
 
-    pub fn focus(&mut self, target: Focus) -> Result<(), Error> {
+    pub fn focus(&mut self, target: Focus) {
         match self.focus {
             Focus::Intervals => self.intervals_state.select(None),
             Focus::Timed => self.timed_state.select(None),
@@ -123,13 +141,13 @@ impl State {
             _ => {},
         }
         match target {
+            Focus::InputAdd => self.cursor_offset = self.buffer.len(),
             Focus::Intervals => if !self.intervals.is_empty() { self.intervals_state.select(Some(self.intervals_offset)) },
             Focus::Timed => if !self.timed.is_empty() { self.timed_state.select(Some(self.timed_offset)) },
             Focus::Untimed => if !self.untimed.is_empty() { self.untimed_state.select(Some(self.untimed_offset)) },
             _ => {},
         }
         self.focus = target;
-        Ok(())
     }
 
     pub fn scroll_down(&mut self) {
@@ -192,5 +210,47 @@ impl State {
         vec.append(&mut self.timed);
         vec.append(&mut self.untimed);
         vec
+    }
+
+    pub fn yank_selected(&mut self) {
+        match self.last_error {
+            Some(Error::YankWarning) => {
+                match self.focus {
+                    Focus::Intervals => { self.buffer = event_to_record(self.intervals.remove(self.intervals_state.selected().unwrap())); }
+                    Focus::Timed => { self.buffer = event_to_record(self.timed.remove(self.timed_state.selected().unwrap())); }
+                    Focus::Untimed => { self.buffer = event_to_record(self.untimed.remove(self.untimed_state.selected().unwrap())); }
+                    _ => {}, // yanking can't happen anywhere else.
+                }
+                self.last_error = None;
+                self.focus(Focus::InputAdd);
+            },
+            _ => match self.focus {
+                Focus::Intervals
+                    | Focus::Timed
+                    | Focus::Untimed
+                => self.last_error = Some(Error::YankWarning),
+                _ => {},
+            },
+        }
+    }
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            buffer: String::new(),
+            cursor_offset: 0,
+            focus: Focus::None,
+            intervals: Vec::new(),
+            intervals_offset: 0,
+            intervals_state: TableState::default(),
+            last_error: None,
+            timed: Vec::new(),
+            timed_offset: 0,
+            timed_state: TableState::default(),
+            untimed: Vec::new(),
+            untimed_offset: 0,
+            untimed_state: ListState::default(),
+        }
     }
 }

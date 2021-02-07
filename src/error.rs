@@ -12,6 +12,7 @@ pub enum Error {
     Io(io::Error),
     NoInfo,
     Serde(serde_json::Error),
+    YankWarning,
 }
 
 impl From<crossterm::ErrorKind> for Error {
