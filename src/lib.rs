@@ -51,7 +51,7 @@ impl Event {
 
 impl Ord for Event {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (self.start, other.start) {
+        let prelim = match (self.start, other.start) {
             (Some(self_time), Some(other_time)) => match (&self.interval, &other.interval) {
                 (Interval::None, Interval::None) => self_time.cmp(&other_time),
                 (Interval::RepDefinite { end: self_end, .. }, Interval::None)
@@ -76,6 +76,10 @@ impl Ord for Event {
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
+        };
+        match prelim {
+            Ordering::Equal => self.description.cmp(&other.description),
+            _ => prelim,
         }
     }
 }
