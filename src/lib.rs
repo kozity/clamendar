@@ -2,6 +2,8 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
+/// Describes the type of interval that an Event possesses. Note that 'None' is a value of this
+/// enum.
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Interval {
     RepDefinite {
@@ -13,6 +15,7 @@ pub enum Interval {
     None,
 }
 
+/// The universal event struct.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Event {
     pub start: Option<DateTime<Local>>,
@@ -21,6 +24,7 @@ pub struct Event {
 }
 
 impl Event {
+    // TODO: actually use this in the implementation to keep repeats up-to-date.
     /// Cycles the start and end times of the interval. Applies only to in/definite repeating intervals.
     pub fn advance(&mut self) {
         match self.interval {
@@ -41,16 +45,20 @@ impl Event {
         }
     }
 
+    /// Returns true if the event, or the end of the interval, has yet to happen.
     pub fn is_upcoming(&self) -> bool {
         match self.start {
             Some(time) => Local::now() < time,
-            _ => true, // untimed events are always relevant.
+            _ => true, // untimed events are always considered upcoming
         }
     }
 }
 
+// Events are ordered chronologically first, with untimed events coming last, then alphabetically
+// by description.
 impl Ord for Event {
     fn cmp(&self, other: &Self) -> Ordering {
+        // prelim sorts only chronologically, with untimed events coming last
         let prelim = match (self.start, other.start) {
             (Some(self_time), Some(other_time)) => match (&self.interval, &other.interval) {
                 (Interval::None, Interval::None) => self_time.cmp(&other_time),
@@ -77,6 +85,7 @@ impl Ord for Event {
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         };
+        // this match sorts additionally alphabetically by description
         match prelim {
             Ordering::Equal => self.description.cmp(&other.description),
             _ => prelim,

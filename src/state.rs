@@ -1,3 +1,5 @@
+/// Contains the definition and logic of the State struct.
+
 use crate::{
     datetime_from_iso,
     error::Error,
@@ -8,6 +10,8 @@ use crate::{
 use std::default::Default;
 use tui::widgets::{ ListState, TableState };
 
+/// Describes the "Focus" of the interface: whether it is in insert mode or focused on one or zero
+/// panes.
 pub enum Focus {
     InputAdd,
     Intervals,
@@ -16,12 +20,16 @@ pub enum Focus {
     None,
 }
 
+/// Struct to consolidate all of the persistent state of the program.
 pub struct State {
+    // the insertion buffer
     pub buffer: String,
     pub cursor_offset: usize,
     pub focus: Focus,
     pub intervals: Vec<Event>,
+    // the offset describes which element should be focused while the pane is selected
     pub intervals_offset: usize,
+    // see the `tui-rs` documentation for information on stateful widgets
     pub intervals_state: TableState,
     pub last_error: Option<Error>,
     pub timed: Vec<Event>,
@@ -33,6 +41,7 @@ pub struct State {
 }
 
 impl State {
+    /// Attempts to parse the string in the insertion buffer and add the described event.
     pub fn add_event_from_buffer(&mut self) -> Result<(), Error> {
         if self.buffer.is_empty() { return Err(Error::NoInfo); }
         if !self.buffer.contains('\t') { return Err(Error::InvalidRecord); }
@@ -112,6 +121,8 @@ impl State {
         }
     }
 
+    /// Shows a warning about deleting the currently selected item. If the warning is already
+    /// showing, deletes the item.
     pub fn delete_selected(&mut self) {
         match self.last_error {
             Some(Error::DeletionWarning) => {
@@ -133,6 +144,7 @@ impl State {
         }
     }
 
+    /// Switches the focus of the interface.
     pub fn focus(&mut self, target: Focus) {
         match self.focus {
             Focus::Intervals => self.intervals_state.select(None),
@@ -150,6 +162,7 @@ impl State {
         self.focus = target;
     }
 
+    /// Selects the next item in the selected pane. Does not wrap from bottom to top.
     pub fn scroll_down(&mut self) {
         match self.focus {
             Focus::Intervals => match self.intervals_state.selected() {
@@ -177,6 +190,7 @@ impl State {
         }
     }
 
+    /// Selects the previous item in the selected pane. Does not wrap from top to bottom.
     pub fn scroll_up(&mut self) {
         match self.focus {
             Focus::Intervals => match self.intervals_state.selected() {
@@ -204,6 +218,7 @@ impl State {
         }
     }
 
+    /// Unifies the three event vectors into one. Used in preparation for serialization.
     pub fn take_all(&mut self) -> Vec<Event> {
         let mut vec: Vec<Event> = Vec::new();
         vec.append(&mut self.intervals);
@@ -212,6 +227,9 @@ impl State {
         vec
     }
 
+    /// Shows a warning about yanking the currently selected item. If the warning is already
+    /// showing, yanks the item, moving its information into an editable form in the insertion
+    /// buffer.
     pub fn yank_selected(&mut self) {
         match self.last_error {
             Some(Error::YankWarning) => {

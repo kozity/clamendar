@@ -1,7 +1,10 @@
+/// Contains the custom Error enum.
+
 use crossterm;
 use serde_json;
 use std::io;
 
+/// Custom errors for the whole project.
 #[derive(Debug)]
 pub enum Error {
     Crossterm(crossterm::ErrorKind),

@@ -5,14 +5,7 @@ mod state;
 use chrono::{DateTime, Local, LocalResult, Timelike, TimeZone};
 use clamendar::{self, Event, Interval};
 use crate::{
-    config::{
-        ADD_PROMPT,
-        ADD_PROMPT_LEN,
-        FILEPATH_BACKUP,
-        FILEPATH,
-        YMD,
-        YMDHM,
-    },
+    config::*,
     error::Error,
     state::{ Focus, State },
 };
@@ -32,6 +25,7 @@ use tui::{
 
 fn main() -> Result<(), Error> {
     let mut s = State::default();
+    // split all deserialized events into vectors: one per pane
     for event in deserialize()? {
         match (&event.start, &event.interval) {
             (Some(_), Interval::None)
@@ -42,6 +36,7 @@ fn main() -> Result<(), Error> {
             (None, _) => s.untimed.push(event),
         }
     }
+    // events are sorted first chronologically, then alphabetically by description
     s.intervals.sort_unstable();
     s.timed.sort_unstable();
     s.untimed.sort_unstable();
@@ -56,9 +51,11 @@ fn main() -> Result<(), Error> {
     terminal::enable_raw_mode()?;
     terminal.clear()?;
 
+    // the main loop renders, then handles input
     loop {
         terminal.draw(|term| {
             let main_rectangle = term.size();
+            // split the screen vertically
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(
@@ -70,6 +67,7 @@ fn main() -> Result<(), Error> {
                     .as_ref()
                 )
                 .split(main_rectangle);
+            // split the middle vertical section into left and right panes
             let chunks_bottom = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints(
@@ -80,7 +78,7 @@ fn main() -> Result<(), Error> {
                 )
                 .split(chunks[1]);
 
-            // Lay out intervals in the top block.
+            // lay out intervals in the top block
             let table_intervals = Table::new(
                 s.intervals
                     .iter()
@@ -100,15 +98,15 @@ fn main() -> Result<(), Error> {
                 .title("Intervals")
             )
             .widths(&[
-                Constraint::Percentage(20),
-                Constraint::Percentage(80),
+                Constraint::Length(COL_TIME_WIDTH),
+                Constraint::Min(0),
             ])
             .highlight_style(Style::default()
                 .add_modifier(Modifier::BOLD)
                 .fg(Color::LightBlue)
             );
 
-            // Lay out timed events in the bottom left block.
+            // lay out timed events in the bottom left block
             let table_timed = Table::new(
                 s.timed
                     .iter()
@@ -128,15 +126,15 @@ fn main() -> Result<(), Error> {
                 .title("Timed")
             )
             .widths(&[
-                Constraint::Percentage(20),
-                Constraint::Percentage(80),
+                Constraint::Length(COL_TIME_WIDTH),
+                Constraint::Min(0),
             ])
             .highlight_style(Style::default()
                 .add_modifier(Modifier::BOLD)
                 .fg(Color::LightBlue)
             );
             
-            // Lay out untimed events in the bottom right block.
+            // lay out untimed events in the bottom right block
             let list_untimed = List::new(s.untimed
                 .iter()
                 .map(|event| ListItem::new(event.description.clone()))
@@ -151,7 +149,7 @@ fn main() -> Result<(), Error> {
                 .fg(Color::LightBlue)
             );
 
-            // Lay out bottom text line.
+            // lay out insert box
             let text = match s.focus {
                 Focus::InputAdd => Paragraph::new(format!("{}{}", ADD_PROMPT, s.buffer.replace('\t', " "))),
                 _ => match s.last_error {
@@ -171,6 +169,8 @@ fn main() -> Result<(), Error> {
             term.render_widget(text, chunks[2]);
         })?;
 
+        // this is the event-handling half of the main loop; keybindings are matched individually
+        // in the match arm for each "Focus" (insert, or whichever pane is selected, if any)
         match s.focus {
             Focus::InputAdd => {
                 let len: u16 = if s.cursor_offset > u16::MAX.into() {
@@ -307,6 +307,7 @@ fn main() -> Result<(), Error> {
     serialize(s.take_all())
 }
 
+/// Attempts to parse a chrono DateTime from the given string using the Local timezone.
 fn datetime_from_iso(string: &str) -> Result<DateTime<Local>, Error> {
     let mut tokens = string.split(&['-', 'T', ':'][..]);
     let date = match (tokens.next(), tokens.next(), tokens.next()) {
@@ -359,8 +360,10 @@ fn datetime_from_iso(string: &str) -> Result<DateTime<Local>, Error> {
     }
 }
 
+/// Formats a string from an existing event so that events yanked into buffer have enough
+/// information to be valid.
 fn event_to_record(event: Event) -> String {
-    const ISO_FULL: &str = "%FT%T";
+    const ISO_FULL: &str = "%FT%R";
     match (event.start, event.interval) {
         (None, _) => format!(
             "\t{}",
@@ -393,11 +396,14 @@ fn event_to_record(event: Event) -> String {
     }
 }
 
+/// Attempts to deserialize a vector of Events from FILEPATH.
 fn deserialize() -> Result<Vec<Event>, Error> {
     let file = fs::read_to_string(FILEPATH)?;
     Ok(serde_json::from_str(&file)?)
 }
 
+/// Returns a string representing the end-time of an interval. Returns None for events without an
+/// end-time.
 fn end_time(event: &Event) -> Option<String> {
     match event.interval {
         Interval::RepDefinite { end, .. }
@@ -415,10 +421,12 @@ fn end_time(event: &Event) -> Option<String> {
     }
 }
 
+/// Attempts to serialize a vector of Events into FILEPATH.
 fn serialize(events: Vec<Event>) -> Result<(), Error> {
     Ok(fs::write(FILEPATH, &serde_json::to_vec(&events)?)?)
 }
 
+/// Returns a string representing the start-time of an interval. Returns None for untimed events.
 fn start_time(event: &Event) -> Option<String> {
     match event.start {
         Some(datetime) => {
