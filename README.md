@@ -19,7 +19,27 @@ Compilation-time configuration in `src/config.rs`. There are no plans for runtim
 Invoke `clamendar` in a terminal, provided you have installed it to your `PATH`. There are three panes. On top are intervals; use this for ongoing periods such as "spring break" or "second decade of existence". On the left are standard and repeating events. Here, track things like "history paper due" or "Mom's birthday". On the right are untimed events. Use this pane for reminders without due dates such as "read the next chapter of *The Rust Programming Language*".
 
 ### Controls
-I'm a vim user. Use 'g' to access the top pane, 'h' or the left arrow key for the left, and 'l' or the right arrow key for the right. Use 'j' and 'k' to navigate between items in the pane with focus, indicated by blue highlighting of present items. 'Escape' removes focus from any panes. Press 'd' twice to delete the selected (blue) item, and press 'y' twice to yank (vim terminology) the selected item into the insertion buffer. Press 'i' to enter and 'Escape' to exit insert mode, which uses the bottom input box.
+vi-inspired.
+
+Key    | Effect                                                                            | Notes (below)
+:------|:----------------------------------------------------------------------------------|:-------------
+g      | Focuses the top pane.                                                             | 1
+h      | Focuses the left pane.                                                            | 1
+l      | Focuses the right pane.                                                           | 1
+j      | Selects the item below the selected one, if one exists.                           | 1
+k      | Selects the item above the selected one, if one exists.                           | 1
+Up     | Moves the cursor to the beginning of the field.                                   | 2
+Down   | Moves the cursor to the end of the field.                                         | 2
+Left   | Moves the cursor left.                                                            | 2
+Right  | Moves the cursor right.                                                           | 2
+d      | Deletes the selected item. Issues a warning first.                                | 1
+y      | Yanks (cuts) the selected item into the insertion buffer. Issues a warning first. | 1
+i      | Focuses the insertion field and enters insert mode.                               | 1
+Enter  | Attempts to add the event described in the insertion buffer.                      | 2
+Escape | Focuses no pane, or exits insert mode, in which case the buffer is preserved.     |
+
+1. Not available in insert mode
+2. Only available in insert mode
 
 ### Insert Mode
 Use the left/right arrow keys to move the cursor accordingly. 'Up' moves to the beginning of the field; 'Down' moves to the end. Note that currently, tab characters are always represented as single spaces. The insertion buffer is cleared only manually or when an event is successfully added.
@@ -49,7 +69,7 @@ String                                                | Pane             | Notes
 ## TODO
 - [ ] think about serializing to iCal instead of/in addition to JSON
 - [ ] implement advancing logic for repeating events
-- [ ] commenting pass, especially for `src/config.rs`
+- [x] commenting pass, especially for `src/config.rs`
 
 ## Hard Hat Required
 This project is in progress. Feel free to bug me for information not found here.
